@@ -158,3 +158,4 @@ None of the above (Kubernetes, CI/CD, Argo CD, Prometheus scraping) is
 implemented yet — this repo is the application layer only.
 # CI/CD pipeline demo commit
 # rollback demo v2
+# clean rollback demo
