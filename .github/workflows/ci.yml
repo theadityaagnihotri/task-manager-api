@@ -61,3 +61,19 @@ jobs:
       - name: Push image to GHCR
         run: |
           docker push ghcr.io/${{ github.repository_owner }}/task-manager:${{ github.sha }}
+      
+      - name: Update GitOps repository
+        run: |
+          git clone https://x-access-token:${{ secrets.GITOPS_PAT }}@github.com/theadityaagnihotri/task-manager-gitops.git gitops-repo
+          cd gitops-repo/task-manager
+
+          sed -i "s/tag: .*/tag: \"${{ github.sha }}\"/" values.yaml
+
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+
+          git add values.yaml
+          git diff --staged --quiet && echo "No changes to commit" && exit 0
+
+          git commit -m "ci: update image tag to ${{ github.sha }} [skip ci]"
+          git push
