@@ -1,161 +1,127 @@
-# Task Manager API
 
-A small, production-structured REST API for managing tasks, built as the
-application layer for a Kubernetes CI/CD + GitOps portfolio project.
+# Task Manager API — Automated Kubernetes CI/CD + GitOps Pipeline
 
-## 1. Project Overview
 
-This is intentionally a simple CRUD API. Its purpose isn't to be a
-feature-rich app — it exists to give a Kubernetes/GitOps pipeline something
-real to build, test, containerize, deploy, and monitor. Every endpoint here
-maps to something that pipeline will exercise.
 
-## 2. Architecture
+A small FastAPI Task Manager REST API, deployed to Kubernetes through a fully
 
-```
-task-manager/
-├── app/
-│   ├── main.py        # FastAPI app, routes, middleware, metrics
-│   ├── database.py     # SQLAlchemy engine/session setup
-│   ├── models.py        # ORM model (Task)
-│   ├── schemas.py       # Pydantic request/response models
-│   ├── crud.py           # DB operations
-│   └── config.py          # Env-var driven settings (APP_VERSION, etc.)
-├── tests/
-│   └── test_api.py     # pytest suite, uses isolated in-memory SQLite
-├── Dockerfile
-└── requirements.txt
-```
+automated CI/CD + GitOps pipeline. A `git push` to this repo is the only
 
-Request flow: `main.py` routes → `crud.py` (DB logic) → `models.py` (SQLAlchemy
-ORM) → SQLite. `schemas.py` validates/serializes everything at the API
-boundary. This separation is what lets SQLite be swapped for Postgres later
-without touching route logic.
+manual step in the entire deploy path — everything from testing to a live,
 
-## 3. Features
+zero-downtime rollout happens on its own.
 
-- Full CRUD on tasks (`/tasks`)
-- `/health` — lightweight liveness/readiness endpoint
-- `/version` — reads `APP_VERSION` env var, used to demo rolling deployments
-- `/metrics` — Prometheus-format metrics (request count, latency, active requests)
-- Auto-generated docs at `/docs` (Swagger) and `/redoc`
-- SQLite persistence, structured so Postgres is a drop-in swap later
 
-## 4. Local Setup
+
+**GitOps configuration repo (Helm chart, desired state):**
+
+[task-manager-gitops](https://github.com/theadityaagnihotri/task-manager-gitops)
+
+
+
+## Architecture
+
+Developer
+↓ git push
+GitHub Actions — test (pytest) → build → Trivy scan → push to GHCR (Git-SHA tag)
+↓
+Auto-commit new image tag to task-manager-gitops (as ci-bot)
+↓
+Argo CD (pull-based, auto sync + self-heal) — watches task-manager-gitops
+↓
+Kubernetes (kind) — Helm-rendered Deployment/Service/Ingress
+↓
+Zero-downtime rolling update → Ingress → Task Manager API
+
+
+
+A parallel monitoring pipeline (Prometheus + Grafana) scrapes the app's own
+
+`/metrics` endpoint via a ServiceMonitor.
+
+
+
+## What's automated, end to end
+
+
+
+Pushing a code change here — with **no other manual commands** — results in:
+
+tests running, a Docker image building and being scanned, that image landing
+
+in GHCR tagged with the exact commit SHA, the separate GitOps repo being
+
+updated automatically, Argo CD detecting and syncing that change, and a
+
+zero-downtime rolling deployment completing on the cluster.
+
+
+
+## Tech stack
+
+
+
+Python 3.12 · FastAPI · SQLite · Docker · GitHub Actions · GHCR · Trivy ·
+
+Kubernetes (kind) · Helm · Argo CD · Prometheus · Grafana · HPA
+
+
+
+## This repository specifically contains
+
+
+
+- `app/` — the FastAPI application (CRUD task endpoints, `/health`,
+
+  `/version`, `/metrics`)
+
+- `tests/` — pytest suite, run on every push
+
+- `Dockerfile` — non-root, slim-based production image
+
+- `.github/workflows/ci.yml` — test → build → scan → push to GHCR →
+
+  auto-update the GitOps repo
+
+
+
+Kubernetes manifests, the Helm chart, and Argo CD configuration are
+
+intentionally kept in the separate `task-manager-gitops` repo, following
+
+standard GitOps practice of separating application code from deployment
+
+configuration.
+
+
+
+## Local development
+
+
 
 ```bash
-python3 -m venv venv
+
+python3.12 -m venv venv
+
 source venv/bin/activate
+
 pip install -r requirements.txt
+
+uvicorn app.main:app --reload
+
 ```
 
-## 5. Running Without Docker
 
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
 
 Visit `http://localhost:8000/docs`.
 
-## 6. Running With Docker
+
 
 ```bash
+
 docker build -t task-manager .
+
 docker run -p 8000:8000 task-manager
+
 ```
 
-Visit `http://localhost:8000/docs`.
-
-To demonstrate a version change (as you would during a rolling deployment):
-
-```bash
-docker run -p 8000:8000 -e APP_VERSION=1.1.0 task-manager
-curl http://localhost:8000/version
-# {"version": "1.1.0"}
-```
-
-## 7. API Endpoints
-
-| Method | Path            | Description        |
-|--------|-----------------|---------------------|
-| GET    | `/health`       | Liveness/readiness check |
-| GET    | `/version`      | Current app version |
-| GET    | `/metrics`      | Prometheus metrics |
-| GET    | `/tasks`        | List all tasks |
-| GET    | `/tasks/{id}`   | Get one task |
-| POST   | `/tasks`        | Create a task |
-| PUT    | `/tasks/{id}`   | Update a task |
-| DELETE | `/tasks/{id}`   | Delete a task |
-
-## 8. Running Tests
-
-```bash
-pytest
-```
-
-Tests run against an isolated in-memory SQLite database — no external DB or
-network dependency required.
-
-## 9. Example curl Commands
-
-```bash
-curl http://localhost:8000/health
-
-curl -X POST http://localhost:8000/tasks \
-  -H "Content-Type: application/json" \
-  -d '{"title": "Learn Kubernetes", "description": "Prepare for CKA"}'
-
-curl http://localhost:8000/tasks
-
-curl -X PUT http://localhost:8000/tasks/1 \
-  -H "Content-Type: application/json" \
-  -d '{"completed": true}'
-
-curl -X DELETE http://localhost:8000/tasks/1
-```
-
-## 10. Environment Variables
-
-| Variable       | Default                  | Purpose |
-|----------------|---------------------------|---------|
-| `APP_VERSION`  | `1.0.0`                   | Returned by `/version`; change + redeploy to demo a rolling update |
-| `DATABASE_URL` | `sqlite:///./tasks.db`    | SQLAlchemy connection string; swap for a Postgres URL later without code changes |
-| `APP_NAME`     | `task-manager`            | Used in structured logs |
-
-See `.env.example`.
-
-## 11. How This Fits the Future Kubernetes CI/CD Pipeline
-
-This repository is intentionally scoped to the **application only** — no
-Kubernetes manifests, Helm charts, Argo CD config, or GitHub Actions workflows
-live here. Those will live in a separate GitOps/infra repo, keeping app code
-and deployment config cleanly separated (a standard GitOps practice).
-
-What's already in place to support that pipeline, once built:
-
-- **Docker**: production-appropriate `Dockerfile` (slim base, non-root user)
-  ready to build and push.
-- **GitHub Actions (planned)**: `pytest` runs cleanly and independently, so a
-  "run tests" CI stage has a real, meaningful gate.
-- **Image registry (planned)**: image builds cleanly with `docker build`,
-  ready to tag and push to GHCR.
-- **Kubernetes probes (planned)**: `/health` is deliberately lightweight and
-  DB-independent, making it safe to wire directly into `livenessProbe` and
-  `readinessProbe`.
-- **Rolling deployments (planned)**: `/version` reflects the `APP_VERSION` env
-  var baked into the image, so a version bump + redeploy is directly
-  observable via `GET /version`.
-- **Argo CD / GitOps (planned)**: no manifests here by design — the separate
-  infra repo will hold the Kubernetes/Helm config that Argo CD watches.
-- **Prometheus + Grafana (planned)**: `/metrics` already exposes
-  `http_requests_total`, `http_request_duration_seconds`, and
-  `http_requests_active` in Prometheus format, ready to scrape once a
-  ServiceMonitor/scrape config is added.
-- **Observability**: structured logs on task create/update/delete and on
-  startup, useful for demoing `kubectl logs`.
-
-None of the above (Kubernetes, CI/CD, Argo CD, Prometheus scraping) is
-implemented yet — this repo is the application layer only.
-# CI/CD pipeline demo commit
-# rollback demo v2
-# clean rollback demo
